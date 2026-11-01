@@ -151,9 +151,9 @@ class MainActivity : AppCompatActivity() {
 
         modes.forEach { (view, m) ->
             if (m == mode) {
-                view.setTextColor(getColor(R.color.gold_pro))
+                view.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
             } else {
-                view.setTextColor(getColor(R.color.gray_text))
+                view.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
             }
         }
     }
@@ -236,9 +236,10 @@ class MainActivity : AppCompatActivity() {
     private fun triggerShutterHaptics() {
         val vibrator = getSystemService(VIBRATOR_SERVICE) as? Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator?.vibrate(VibrationEffect.createOneShot(45, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator?.vibrate(VibrationEffect.createOneShot(45L, VibrationEffect.DEFAULT_AMPLITUDE))
         } else {
-            vibrator?.vibrate(45)
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(45L)
         }
     }
 

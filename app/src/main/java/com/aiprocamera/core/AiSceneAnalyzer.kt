@@ -49,7 +49,7 @@ class AiSceneAnalyzer(
             }
         }
 
-        val avgLum = if (samples > 0) totalLum.toFloat() / samples else 128.0f
+        val avgLum = if (samples > 0) totalLum.toFloat() / samples.toFloat() else 128.0f
         // Dynamic Range approximation: max / min
         val dr = (maxLum.coerceAtLeast(1).toFloat()) / (minLum.coerceAtLeast(1).toFloat())
 

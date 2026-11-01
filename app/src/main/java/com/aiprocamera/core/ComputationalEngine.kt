@@ -100,9 +100,9 @@ object ComputationalEngine {
             for (f in 0 until numFrames) {
                 val normW = weightMaps[f][i] / sumW
                 val color = pixelBuffers[f][i]
-                fusedR += (color shr 16 and 0xFF) * normW
-                fusedG += (color shr 8 and 0xFF) * normW
-                fusedB += (color and 0xFF) * normW
+                fusedR += (color shr 16 and 0xFF).toFloat() * normW
+                fusedG += (color shr 8 and 0xFF).toFloat() * normW
+                fusedB += (color and 0xFF).toFloat() * normW
             }
 
             val r = fusedR.toInt().coerceIn(0, 255)
@@ -163,9 +163,9 @@ object ComputationalEngine {
                         val weight = exp(-(distSq / twoSigmaSpatialSq) - ((lumDiff * lumDiff) / twoSigmaRangeSq))
 
                         sumWeights += weight
-                        sumR += nR * weight
-                        sumG += nG * weight
-                        sumB += nB * weight
+                        sumR += nR.toFloat() * weight
+                        sumG += nG.toFloat() * weight
+                        sumB += nB.toFloat() * weight
                     }
                 }
 
@@ -315,9 +315,9 @@ object ComputationalEngine {
             val diffG = oG - bG
             val diffB = oB - bB
 
-            val sR = if (abs(diffR) >= threshold) (oR + diffR * amount).toInt().coerceIn(0, 255) else oR
-            val sG = if (abs(diffG) >= threshold) (oG + diffG * amount).toInt().coerceIn(0, 255) else oG
-            val sB = if (abs(diffB) >= threshold) (oB + diffB * amount).toInt().coerceIn(0, 255) else oB
+            val sR = if (abs(diffR) >= threshold) (oR.toFloat() + diffR.toFloat() * amount).toInt().coerceIn(0, 255) else oR
+            val sG = if (abs(diffG) >= threshold) (oG.toFloat() + diffG.toFloat() * amount).toInt().coerceIn(0, 255) else oG
+            val sB = if (abs(diffB) >= threshold) (oB.toFloat() + diffB.toFloat() * amount).toInt().coerceIn(0, 255) else oB
 
             outPixels[i] = -0x1000000 or (sR shl 16) or (sG shl 8) or sB
         }

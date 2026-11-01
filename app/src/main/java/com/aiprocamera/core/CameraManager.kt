@@ -161,6 +161,7 @@ class CameraManager(
         val bytes = ByteArray(buffer.remaining())
         buffer.get(bytes)
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
 
         // Rotate if needed according to image rotation degrees
         val rotation = image.imageInfo.rotationDegrees
