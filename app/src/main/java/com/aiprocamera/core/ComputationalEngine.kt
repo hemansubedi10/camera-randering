@@ -19,7 +19,6 @@ object ComputationalEngine {
 
     /**
      * Mertens Exposure Fusion: merges multi-exposure bracketed frames without ghosting.
-     * Evaluates contrast (Laplacian proxy), saturation (channel deviation), and well-exposedness (Gaussian 0.5).
      */
     fun fuseBracketed(frames: List<Bitmap>): Bitmap {
         if (frames.isEmpty()) throw IllegalArgumentException("No frames to fuse")
@@ -53,18 +52,14 @@ object ComputationalEngine {
                     val g = ((color shr 8) and 0xFF) / 255.0f
                     val b = (color and 0xFF) / 255.0f
 
-                    // 1. Well-exposedness metric
                     val wR = exp(-((r - 0.5f) * (r - 0.5f)) / sigma2)
                     val wG = exp(-((g - 0.5f) * (g - 0.5f)) / sigma2)
                     val wB = exp(-((b - 0.5f) * (b - 0.5f)) / sigma2)
                     val exposedness = wR * wG * wB
 
-                    // 2. Saturation metric
                     val mu = (r + g + b) / 3.0f
                     val sat = sqrt(((r - mu) * (r - mu) + (g - mu) * (g - mu) + (b - mu) * (b - mu)) / 3.0f)
 
-                    // 3. Contrast metric
-                    val lum = 0.299f * r + 0.587f * g + 0.114f * b
                     val contrast = if (x > 0 && x < width - 1) {
                         val leftLum = ((pixels[idx - 1] shr 8) and 0xFF) / 255.0f
                         val rightLum = ((pixels[idx + 1] shr 8) and 0xFF) / 255.0f
@@ -78,7 +73,6 @@ object ComputationalEngine {
             }
         }
 
-        // Normalize weights and blend
         val outputPixels = IntArray(numPixels)
         for (i in 0 until numPixels) {
             var sumWeight = 0.0f
@@ -111,7 +105,8 @@ object ComputationalEngine {
     }
 
     /**
-     * Ultra Frame-by-Frame Denoising with Edge-Preserving Bilateral Filtering.
+     * Dual-Domain Edge-Preserving Bilateral Denoising:
+     * Suppresses digital sensor noise without blurring real textures (fabric, hair, brick).
      */
     fun bilateralDenoise(src: Bitmap, spatialSigma: Float = 2.0f, rangeSigma: Float = 25.0f): Bitmap {
         val width = src.width
@@ -178,6 +173,111 @@ object ComputationalEngine {
     }
 
     /**
+     * Natural Multi-Frequency Detail Restoration:
+     * Unlike artificial AI hallucination or heavy over-sharpening halos, this separates
+     * fine micro-frequencies from coarse boundaries and amplifies authentic optical detail.
+     */
+    fun enhanceOpticalDetail(src: Bitmap, clarityMultiplier: Float = 1.20f): Bitmap {
+        val width = src.width
+        val height = src.height
+        val pixels = IntArray(width * height)
+        val outPixels = IntArray(width * height)
+        src.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        // Pass 1: Fine-scale micro structure (3x3 kernel)
+        val fineBlur = IntArray(width * height)
+        for (y in 0 until height) {
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                var rAcc = 0; var gAcc = 0; var bAcc = 0; var count = 0
+                for (dy in -1..1) {
+                    val ny = (y + dy).coerceIn(0, height - 1)
+                    val nRow = ny * width
+                    for (dx in -1..1) {
+                        val nx = (x + dx).coerceIn(0, width - 1)
+                        val c = pixels[nRow + nx]
+                        rAcc += (c shr 16) and 0xFF
+                        gAcc += (c shr 8) and 0xFF
+                        bAcc += c and 0xFF
+                        count++
+                    }
+                }
+                fineBlur[rowOffset + x] = (0xFF shl 24) or ((rAcc / count) shl 16) or ((gAcc / count) shl 8) or (bAcc / count)
+            }
+        }
+
+        // Pass 2: Coarse structure (5x5 kernel)
+        val coarseBlur = IntArray(width * height)
+        for (y in 0 until height) {
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                var rAcc = 0; var gAcc = 0; var bAcc = 0; var count = 0
+                for (dy in -2..2 step 2) {
+                    val ny = (y + dy).coerceIn(0, height - 1)
+                    val nRow = ny * width
+                    for (dx in -2..2 step 2) {
+                        val nx = (x + dx).coerceIn(0, width - 1)
+                        val c = pixels[nRow + nx]
+                        rAcc += (c shr 16) and 0xFF
+                        gAcc += (c shr 8) and 0xFF
+                        bAcc += c and 0xFF
+                        count++
+                    }
+                }
+                coarseBlur[rowOffset + x] = (0xFF shl 24) or ((rAcc / count) shl 16) or ((gAcc / count) shl 8) or (bAcc / count)
+            }
+        }
+
+        // Decompose frequencies:
+        // High Freq = (Original - FineBlur) -> subtle micro texture
+        // Mid Freq = (FineBlur - CoarseBlur) -> true optical clarity & local contrast
+        val highBoost = 0.55f * clarityMultiplier
+        val midBoost = 0.35f * clarityMultiplier
+
+        for (i in pixels.indices) {
+            val orig = pixels[i]
+            val fine = fineBlur[i]
+            val coarse = coarseBlur[i]
+
+            val oR = (orig shr 16) and 0xFF
+            val oG = (orig shr 8) and 0xFF
+            val oB = orig and 0xFF
+
+            val fR = (fine shr 16) and 0xFF
+            val fG = (fine shr 8) and 0xFF
+            val fB = fine and 0xFF
+
+            val cR = (coarse shr 16) and 0xFF
+            val cG = (coarse shr 8) and 0xFF
+            val cB = coarse and 0xFF
+
+            // Extract frequency components
+            val highR = (oR - fR)
+            val highG = (oG - fG)
+            val highB = (oB - fB)
+
+            val midR = (fR - cR)
+            val midG = (fG - cG)
+            val midB = (fB - cB)
+
+            // Clamp high frequency to prevent noise amplification
+            val clampedHighR = highR.coerceIn(-28, 28)
+            val clampedHighG = highG.coerceIn(-28, 28)
+            val clampedHighB = highB.coerceIn(-28, 28)
+
+            val nR = (oR + clampedHighR * highBoost + midR * midBoost).toInt().coerceIn(0, 255)
+            val nG = (oG + clampedHighG * highBoost + midG * midBoost).toInt().coerceIn(0, 255)
+            val nB = (oB + clampedHighB * highBoost + midB * midBoost).toInt().coerceIn(0, 255)
+
+            outPixels[i] = (0xFF shl 24) or (nR shl 16) or (nG shl 8) or nB
+        }
+
+        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        result.setPixels(outPixels, 0, width, 0, 0, width, height)
+        return result
+    }
+
+    /**
      * Film Tone Curve Reproduction & Aesthetic Color Grading (Leica, Nepal Twilight, Vivid Landscape).
      */
     fun toneMapAndGrade(src: Bitmap, style: ColorStyle): Bitmap {
@@ -192,26 +292,21 @@ object ComputationalEngine {
             var g = ((color shr 8) and 0xFF) / 255.0f
             var b = (color and 0xFF) / 255.0f
 
-            // ACES Filmic Tone Mapping Curve
             r = acesToneCurve(r)
             g = acesToneCurve(g)
             b = acesToneCurve(b)
 
             when (style) {
                 ColorStyle.NEPAL_TWILIGHT -> {
-                    // Sky cobalt blue + warm magenta alpenglow highlights
                     b = (b * 1.10f).coerceAtMost(1.0f)
                     if (r > 0.55f) r = (r * 1.08f).coerceAtMost(1.0f)
-                    // Deep rich blacks with slight cyan cast
                     if (g < 0.35f) g = (g * 0.95f)
                 }
                 ColorStyle.LEICA_NATURAL -> {
-                    // Soft organic roll-off, authentic skin, gentle highlight compression
                     r = (r * 0.98f + 0.015f).coerceIn(0f, 1f)
                     b = (b * 0.97f + 0.015f).coerceIn(0f, 1f)
                 }
                 ColorStyle.VIVID_LANDSCAPE -> {
-                    // Polarized landscape: rich greens, punchy sky, micro-saturation
                     g = (g * 1.08f).coerceAtMost(1.0f)
                     b = (b * 1.07f).coerceAtMost(1.0f)
                     r = (r * 1.03f).coerceAtMost(1.0f)
@@ -231,71 +326,6 @@ object ComputationalEngine {
     }
 
     /**
-     * Micro-Contrast Unsharp Mask for Crisp Edge Details.
-     */
-    fun unsharpMask(src: Bitmap, amount: Float = 0.65f, threshold: Int = 4): Bitmap {
-        val width = src.width
-        val height = src.height
-        val pixels = IntArray(width * height)
-        val outPixels = IntArray(width * height)
-        src.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        val blurredPixels = IntArray(width * height)
-        for (y in 0 until height) {
-            val rowOffset = y * width
-            for (x in 0 until width) {
-                var rAcc = 0
-                var gAcc = 0
-                var bAcc = 0
-                var count = 0
-
-                for (dy in -1..1) {
-                    val ny = (y + dy).coerceIn(0, height - 1)
-                    val nRowOffset = ny * width
-                    for (dx in -1..1) {
-                        val nx = (x + dx).coerceIn(0, width - 1)
-                        val c = pixels[nRowOffset + nx]
-                        rAcc += (c shr 16) and 0xFF
-                        gAcc += (c shr 8) and 0xFF
-                        bAcc += c and 0xFF
-                        count++
-                    }
-                }
-
-                blurredPixels[rowOffset + x] =
-                    (0xFF shl 24) or ((rAcc / count) shl 16) or ((gAcc / count) shl 8) or (bAcc / count)
-            }
-        }
-
-        for (i in pixels.indices) {
-            val orig = pixels[i]
-            val blur = blurredPixels[i]
-
-            val oR = (orig shr 16) and 0xFF
-            val oG = (orig shr 8) and 0xFF
-            val oB = orig and 0xFF
-
-            val bR = (blur shr 16) and 0xFF
-            val bG = (blur shr 8) and 0xFF
-            val bB = blur and 0xFF
-
-            val diffR = oR - bR
-            val diffG = oG - bG
-            val diffB = oB - bB
-
-            val nR = if (abs(diffR) > threshold) (oR + diffR * amount).toInt().coerceIn(0, 255) else oR
-            val nG = if (abs(diffG) > threshold) (oG + diffG * amount).toInt().coerceIn(0, 255) else oG
-            val nB = if (abs(diffB) > threshold) (oB + diffB * amount).toInt().coerceIn(0, 255) else oB
-
-            outPixels[i] = (0xFF shl 24) or (nR shl 16) or (nG shl 8) or nB
-        }
-
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        result.setPixels(outPixels, 0, width, 0, 0, width, height)
-        return result
-    }
-
-    /**
      * Portrait Mode Optical Bokeh with Depth Falloff & Face/Skin Tone Protection.
      */
     fun applyPortraitBokeh(src: Bitmap): Bitmap {
@@ -310,18 +340,13 @@ object ComputationalEngine {
         val radiusX = width * 0.33f
         val radiusY = height * 0.38f
 
-        // Fast separable horizontal + vertical blur pass for creamy background bokeh
         val bokehRadius = 6
         val blurredH = IntArray(width * height)
 
-        // Horizontal pass
         for (y in 0 until height) {
             val rowOffset = y * width
             for (x in 0 until width) {
-                var rAcc = 0
-                var gAcc = 0
-                var bAcc = 0
-                var count = 0
+                var rAcc = 0; var gAcc = 0; var bAcc = 0; var count = 0
                 for (k in -bokehRadius..bokehRadius) {
                     val nx = (x + k).coerceIn(0, width - 1)
                     val c = pixels[rowOffset + nx]
@@ -334,13 +359,9 @@ object ComputationalEngine {
             }
         }
 
-        // Vertical pass + depth blend
         for (x in 0 until width) {
             for (y in 0 until height) {
-                var rAcc = 0
-                var gAcc = 0
-                var bAcc = 0
-                var count = 0
+                var rAcc = 0; var gAcc = 0; var bAcc = 0; var count = 0
                 for (k in -bokehRadius..bokehRadius) {
                     val ny = (y + k).coerceIn(0, height - 1)
                     val c = blurredH[ny * width + x]
@@ -355,7 +376,6 @@ object ComputationalEngine {
                 val oG = (origColor shr 8) and 0xFF
                 val oB = origColor and 0xFF
 
-                // Check skin tone proxy (protect subjects even near edges)
                 val isSkin = (oR > 95 && oG > 40 && oB > 20 && (oR - oG) > 15 && oR > oB)
 
                 val dx = (x - centerX) / radiusX
@@ -382,40 +402,30 @@ object ComputationalEngine {
     }
 
     /**
-     * Ultra Macro Detail Enhancement (Texture enhancement & high-pass micro clarity).
-     */
-    fun applyMacroEnhancement(src: Bitmap): Bitmap {
-        val sharpened = unsharpMask(src, amount = 1.25f, threshold = 2)
-        return toneMapAndGrade(sharpened, ColorStyle.VIVID_LANDSCAPE)
-    }
-
-    /**
      * Night Sight Multi-Frame Stacking (Shadow recovery, temporal noise suppression).
      */
-    fun processNightSight(frames: List<Bitmap>): Bitmap {
+    fun processNightSight(frames: List<Bitmap>, clarityGain: Float = 1.35f): Bitmap {
         val fused = fuseBracketed(frames)
-        // Two-pass spatial noise reduction for low-light sensor read noise
         val clean1 = bilateralDenoise(fused, spatialSigma = 2.5f, rangeSigma = 32.0f)
         val clean2 = bilateralDenoise(clean1, spatialSigma = 1.5f, rangeSigma = 20.0f)
         val graded = toneMapAndGrade(clean2, ColorStyle.NEPAL_TWILIGHT)
-        return unsharpMask(graded, amount = 0.75f, threshold = 3)
+        return enhanceOpticalDetail(graded, clarityMultiplier = clarityGain)
     }
 
     /**
      * High Dynamic Range (HDR+) Multi-Exposure Pipeline.
      */
-    fun processHdr(frames: List<Bitmap>): Bitmap {
+    fun processHdr(frames: List<Bitmap>, clarityGain: Float = 1.25f): Bitmap {
         val fused = fuseBracketed(frames)
         val denoised = bilateralDenoise(fused, spatialSigma = 1.8f, rangeSigma = 22.0f)
         val graded = toneMapAndGrade(denoised, ColorStyle.VIVID_LANDSCAPE)
-        return unsharpMask(graded, amount = 0.85f, threshold = 3)
+        return enhanceOpticalDetail(graded, clarityMultiplier = clarityGain)
     }
 
     /**
      * Professional DSLR Single-Frame Rendering (Authentic color science, clean film grain).
      */
-    fun processProDslr(src: Bitmap, manualEvBias: Int): Bitmap {
-        // Apply manual EV brightness normalization
+    fun processProDslr(src: Bitmap, manualEvBias: Int, clarityGain: Float = 1.20f): Bitmap {
         val width = src.width
         val height = src.height
         val pixels = IntArray(width * height)
@@ -433,7 +443,15 @@ object ComputationalEngine {
         corrected.setPixels(pixels, 0, width, 0, 0, width, height)
 
         val graded = toneMapAndGrade(corrected, ColorStyle.LEICA_NATURAL)
-        return unsharpMask(graded, amount = 0.7f, threshold = 4)
+        return enhanceOpticalDetail(graded, clarityMultiplier = clarityGain)
+    }
+
+    /**
+     * Ultra Macro Detail Enhancement.
+     */
+    fun applyMacroEnhancement(src: Bitmap, clarityGain: Float = 1.45f): Bitmap {
+        val graded = toneMapAndGrade(src, ColorStyle.VIVID_LANDSCAPE)
+        return enhanceOpticalDetail(graded, clarityMultiplier = clarityGain)
     }
 
     private fun acesToneCurve(x: Float): Float {
