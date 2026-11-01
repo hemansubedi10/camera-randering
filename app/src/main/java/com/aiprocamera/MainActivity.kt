@@ -148,7 +148,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             onMetricsUpdated = { metrics ->
                 runOnUiThread {
                     latestSceneMetrics = metrics
-                    binding.txtAiScene.text = "AI: ${metrics.luxEstimate.toInt()} Lux • ${metrics.sceneType}"
+                    val sharpnessTag = if (metrics.focusSharpnessScore > 65f) "Sharp AF" else "Focusing"
+                    binding.txtAiScene.text = "${metrics.sceneType} • $sharpnessTag"
                     binding.cameraOverlay.updateHistogram(metrics.histogramBins)
                 }
             }
@@ -355,7 +356,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         modes.forEach { (view, m) ->
             if (m == mode) {
-                // Active Glowing Pill with spring scale animation
                 view.setBackgroundResource(R.drawable.bg_mode_active_pill)
                 view.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
                 view.animate()
@@ -364,13 +364,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     .setDuration(180)
                     .start()
 
-                // Auto-center selected mode in horizontal scroll view
                 binding.modeScroll.post {
                     val scrollX = (view.left + view.right) / 2 - binding.modeScroll.width / 2
                     binding.modeScroll.smoothScrollTo(scrollX, 0)
                 }
             } else {
-                // Inactive Mode
                 view.setBackgroundResource(R.drawable.bg_mode_inactive_pill)
                 view.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
                 view.animate()
@@ -381,7 +379,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
 
-        // Show/hide exposure slider specifically for Pro mode
         if (mode == CameraUIMode.PRO_DSLR) {
             binding.seekExposure.visibility = View.VISIBLE
             binding.btnHdrBadge.text = "PRO RAW"
@@ -401,6 +398,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         binding.btnShutter.isEnabled = false
         binding.processingOverlay.visibility = View.VISIBLE
 
+        val clarityMultiplier = latestSceneMetrics?.liveClarityGain ?: 1.20f
+
         lifecycleScope.launch {
             try {
                 val processedBitmap: Bitmap = withContext(Dispatchers.Default) {
@@ -410,7 +409,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                             val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
                             updateProcessStatus("Mertens Fusion & Deep Noise Scrubbing...")
-                            ComputationalEngine.processNightSight(bracketFrames)
+                            ComputationalEngine.processNightSight(bracketFrames, clarityGain = clarityMultiplier * 1.15f)
                         }
 
                         CameraUIMode.HDR -> {
@@ -418,7 +417,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                             val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
                             updateProcessStatus("Dynamic Range Fusion & Highlight Preservation...")
-                            ComputationalEngine.processHdr(bracketFrames)
+                            ComputationalEngine.processHdr(bracketFrames, clarityGain = clarityMultiplier)
                         }
 
                         CameraUIMode.PORTRAIT -> {
@@ -428,7 +427,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                             updateProcessStatus("Optical Bokeh Fall-Off & Facial Tone Polish...")
                             val graded = ComputationalEngine.toneMapAndGrade(rawFrame, ColorStyle.LEICA_NATURAL)
                             val bokeh = ComputationalEngine.applyPortraitBokeh(graded)
-                            ComputationalEngine.unsharpMask(bokeh, amount = 0.55f, threshold = 3)
+                            ComputationalEngine.enhanceOpticalDetail(bokeh, clarityMultiplier = clarityMultiplier * 0.90f)
                         }
 
                         CameraUIMode.MACRO -> {
@@ -436,7 +435,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                             val rawFrame = cameraManager.captureSingleFrame()
 
                             updateProcessStatus("Ultra Texture & Micro-Edge Clarification...")
-                            ComputationalEngine.applyMacroEnhancement(rawFrame)
+                            ComputationalEngine.applyMacroEnhancement(rawFrame, clarityGain = clarityMultiplier * 1.25f)
                         }
 
                         CameraUIMode.PRO_DSLR -> {
@@ -444,7 +443,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                             val rawFrame = cameraManager.captureSingleFrame()
 
                             updateProcessStatus("Manual Exposure Grading & Film Roll-Off...")
-                            ComputationalEngine.processProDslr(rawFrame, manualEvCompensation)
+                            ComputationalEngine.processProDslr(rawFrame, manualEvCompensation, clarityGain = clarityMultiplier)
                         }
 
                         CameraUIMode.AUTO -> {
@@ -456,7 +455,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                                 rawFrame,
                                 latestSceneMetrics?.recommendedStyle ?: ColorStyle.LEICA_NATURAL
                             )
-                            ComputationalEngine.unsharpMask(graded, amount = 0.65f)
+                            ComputationalEngine.enhanceOpticalDetail(graded, clarityMultiplier = clarityMultiplier)
                         }
                     }
                 }
