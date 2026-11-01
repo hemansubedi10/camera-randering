@@ -6,18 +6,20 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.sqrt
 
 enum class ColorStyle {
-    NEPAL_TWILIGHT, // Cobalt sky + pink alpenglow + shadow foliage
-    LEICA_NATURAL,  // Soft organic roll-off, authentic skin
-    VIVID_LANDSCAPE // High dynamic range, deep greens and sky
+    NEPAL_TWILIGHT, // Cobalt sky + alpenglow highlights + rich deep shadow detail
+    LEICA_NATURAL,  // Iconic Leica M-system film roll-off, soft highlights, natural organic skin
+    VIVID_LANDSCAPE // High dynamic range, deep foliage emeralds & deep polarizer azure skies
 }
 
 object ComputationalEngine {
 
     /**
      * Mertens Exposure Fusion: merges multi-exposure bracketed frames without ghosting.
+     * Evaluates contrast (Laplacian proxy), saturation (channel deviation), and well-exposedness (Gaussian 0.5).
      */
     fun fuseBracketed(frames: List<Bitmap>): Bitmap {
         if (frames.isEmpty()) throw IllegalArgumentException("No frames to fuse")
@@ -34,8 +36,8 @@ object ComputationalEngine {
             buf
         }
 
-        // Compute Mertens quality weights: Contrast * Saturation * WellExposedness
         val weightMaps = Array(numFrames) { FloatArray(numPixels) }
+        val sigma2 = 2.0f * 0.2f * 0.2f
 
         for (f in 0 until numFrames) {
             val pixels = pixelBuffers[f]
@@ -51,18 +53,17 @@ object ComputationalEngine {
                     val g = ((color shr 8) and 0xFF) / 255.0f
                     val b = (color and 0xFF) / 255.0f
 
-                    // 1. Well-exposedness metric (Gaussian centered at 0.5, sigma=0.2)
-                    val sigma2 = 2.0f * 0.2f * 0.2f
+                    // 1. Well-exposedness metric
                     val wR = exp(-((r - 0.5f) * (r - 0.5f)) / sigma2)
                     val wG = exp(-((g - 0.5f) * (g - 0.5f)) / sigma2)
                     val wB = exp(-((b - 0.5f) * (b - 0.5f)) / sigma2)
                     val exposedness = wR * wG * wB
 
-                    // 2. Saturation metric (standard deviation of RGB channels)
+                    // 2. Saturation metric
                     val mu = (r + g + b) / 3.0f
                     val sat = sqrt(((r - mu) * (r - mu) + (g - mu) * (g - mu) + (b - mu) * (b - mu)) / 3.0f)
 
-                    // 3. Simple spatial contrast proxy
+                    // 3. Contrast metric
                     val lum = 0.299f * r + 0.587f * g + 0.114f * b
                     val contrast = if (x > 0 && x < width - 1) {
                         val leftLum = ((pixels[idx - 1] shr 8) and 0xFF) / 255.0f
@@ -72,7 +73,6 @@ object ComputationalEngine {
                         0.1f
                     }
 
-                    // Combined Mertens weight + epsilon to avoid division by zero
                     weights[idx] = (exposedness * (sat + 0.05f) * (contrast + 0.05f)) + 1e-6f
                 }
             }
@@ -98,9 +98,9 @@ object ComputationalEngine {
                 accB += (color and 0xFF) * normWeight
             }
 
-            val outR = min(255, max(0, accR.toInt()))
-            val outG = min(255, max(0, accG.toInt()))
-            val outB = min(255, max(0, accB.toInt()))
+            val outR = accR.toInt().coerceIn(0, 255)
+            val outG = accG.toInt().coerceIn(0, 255)
+            val outB = accB.toInt().coerceIn(0, 255)
 
             outputPixels[i] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
         }
@@ -164,9 +164,9 @@ object ComputationalEngine {
                     }
                 }
 
-                val finalR = min(255, max(0, (sumR / sumWeights).toInt()))
-                val finalG = min(255, max(0, (sumG / sumWeights).toInt()))
-                val finalB = min(255, max(0, (sumB / sumWeights).toInt()))
+                val finalR = (sumR / sumWeights).toInt().coerceIn(0, 255)
+                val finalG = (sumG / sumWeights).toInt().coerceIn(0, 255)
+                val finalB = (sumB / sumWeights).toInt().coerceIn(0, 255)
 
                 outPixels[centerIdx] = (0xFF shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
             }
@@ -178,7 +178,7 @@ object ComputationalEngine {
     }
 
     /**
-     * Film Tone Curve Reproduction & Aesthetic Color Grading.
+     * Film Tone Curve Reproduction & Aesthetic Color Grading (Leica, Nepal Twilight, Vivid Landscape).
      */
     fun toneMapAndGrade(src: Bitmap, style: ColorStyle): Bitmap {
         val width = src.width
@@ -192,36 +192,35 @@ object ComputationalEngine {
             var g = ((color shr 8) and 0xFF) / 255.0f
             var b = (color and 0xFF) / 255.0f
 
-            // Reinhard + ACES Filmic S-curve tone mapping
+            // ACES Filmic Tone Mapping Curve
             r = acesToneCurve(r)
             g = acesToneCurve(g)
             b = acesToneCurve(b)
 
-            // Color Grading Style transforms
             when (style) {
                 ColorStyle.NEPAL_TWILIGHT -> {
                     // Sky cobalt blue + warm magenta alpenglow highlights
-                    b = (b * 1.08f).coerceAtMost(1.0f)
-                    if (r > 0.6f) r = (r * 1.05f).coerceAtMost(1.0f)
-                    // Foliage shadow saturation boost
-                    if (g < 0.4f) g = (g * 0.96f)
+                    b = (b * 1.10f).coerceAtMost(1.0f)
+                    if (r > 0.55f) r = (r * 1.08f).coerceAtMost(1.0f)
+                    // Deep rich blacks with slight cyan cast
+                    if (g < 0.35f) g = (g * 0.95f)
                 }
                 ColorStyle.LEICA_NATURAL -> {
-                    // Leica classic natural roll-off: gentle contrast and rich midtones
-                    r = (r * 0.98f + 0.01f).coerceIn(0f, 1f)
-                    b = (b * 0.97f + 0.01f).coerceIn(0f, 1f)
+                    // Soft organic roll-off, authentic skin, gentle highlight compression
+                    r = (r * 0.98f + 0.015f).coerceIn(0f, 1f)
+                    b = (b * 0.97f + 0.015f).coerceIn(0f, 1f)
                 }
                 ColorStyle.VIVID_LANDSCAPE -> {
-                    // Deep greens & punchy skies
-                    g = (g * 1.06f).coerceAtMost(1.0f)
-                    b = (b * 1.05f).coerceAtMost(1.0f)
-                    r = (r * 1.02f).coerceAtMost(1.0f)
+                    // Polarized landscape: rich greens, punchy sky, micro-saturation
+                    g = (g * 1.08f).coerceAtMost(1.0f)
+                    b = (b * 1.07f).coerceAtMost(1.0f)
+                    r = (r * 1.03f).coerceAtMost(1.0f)
                 }
             }
 
-            val outR = min(255, max(0, (r * 255.0f).toInt()))
-            val outG = min(255, max(0, (g * 255.0f).toInt()))
-            val outB = min(255, max(0, (b * 255.0f).toInt()))
+            val outR = (r * 255.0f).toInt().coerceIn(0, 255)
+            val outG = (g * 255.0f).toInt().coerceIn(0, 255)
+            val outB = (b * 255.0f).toInt().coerceIn(0, 255)
 
             pixels[i] = (0xFF shl 24) or (outR shl 16) or (outG shl 8) or outB
         }
@@ -241,7 +240,6 @@ object ComputationalEngine {
         val outPixels = IntArray(width * height)
         src.getPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Box blur approximation for high-pass mask
         val blurredPixels = IntArray(width * height)
         for (y in 0 until height) {
             val rowOffset = y * width
@@ -269,7 +267,6 @@ object ComputationalEngine {
             }
         }
 
-        // Apply Unsharp mask
         for (i in pixels.indices) {
             val orig = pixels[i]
             val blur = blurredPixels[i]
@@ -299,7 +296,7 @@ object ComputationalEngine {
     }
 
     /**
-     * Portrait Mode Depth Simulator (Optical bokeh fall-off with subject masking).
+     * Portrait Mode Optical Bokeh with Depth Falloff & Face/Skin Tone Protection.
      */
     fun applyPortraitBokeh(src: Bitmap): Bitmap {
         val width = src.width
@@ -309,46 +306,63 @@ object ComputationalEngine {
         src.getPixels(pixels, 0, width, 0, 0, width, height)
 
         val centerX = width / 2.0f
-        val centerY = height * 0.45f
-        val radiusX = width * 0.32f
+        val centerY = height * 0.44f
+        val radiusX = width * 0.33f
         val radiusY = height * 0.38f
 
-        val boxR = 4
+        // Fast separable horizontal + vertical blur pass for creamy background bokeh
+        val bokehRadius = 6
+        val blurredH = IntArray(width * height)
+
+        // Horizontal pass
         for (y in 0 until height) {
             val rowOffset = y * width
             for (x in 0 until width) {
-                val dx = (x - centerX) / radiusX
-                val dy = (y - centerY) / radiusY
-                val dist = sqrt(dx * dx + dy * dy)
-
-                // Outside portrait ellipse -> blend towards heavy bokeh blur
-                val blurFactor = ((dist - 0.85f) / 0.5f).coerceIn(0.0f, 1.0f)
-                if (blurFactor <= 0.05f) {
-                    outPixels[rowOffset + x] = pixels[rowOffset + x]
-                    continue
-                }
-
                 var rAcc = 0
                 var gAcc = 0
                 var bAcc = 0
                 var count = 0
-                for (ky in -boxR..boxR) {
-                    val ny = (y + ky).coerceIn(0, height - 1)
-                    val nRow = ny * width
-                    for (kx in -boxR..boxR) {
-                        val nx = (x + kx).coerceIn(0, width - 1)
-                        val c = pixels[nRow + nx]
-                        rAcc += (c shr 16) and 0xFF
-                        gAcc += (c shr 8) and 0xFF
-                        bAcc += c and 0xFF
-                        count++
-                    }
+                for (k in -bokehRadius..bokehRadius) {
+                    val nx = (x + k).coerceIn(0, width - 1)
+                    val c = pixels[rowOffset + nx]
+                    rAcc += (c shr 16) and 0xFF
+                    gAcc += (c shr 8) and 0xFF
+                    bAcc += c and 0xFF
+                    count++
+                }
+                blurredH[rowOffset + x] = (0xFF shl 24) or ((rAcc / count) shl 16) or ((gAcc / count) shl 8) or (bAcc / count)
+            }
+        }
+
+        // Vertical pass + depth blend
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                var rAcc = 0
+                var gAcc = 0
+                var bAcc = 0
+                var count = 0
+                for (k in -bokehRadius..bokehRadius) {
+                    val ny = (y + k).coerceIn(0, height - 1)
+                    val c = blurredH[ny * width + x]
+                    rAcc += (c shr 16) and 0xFF
+                    gAcc += (c shr 8) and 0xFF
+                    bAcc += c and 0xFF
+                    count++
                 }
 
-                val origColor = pixels[rowOffset + x]
+                val origColor = pixels[y * width + x]
                 val oR = (origColor shr 16) and 0xFF
                 val oG = (origColor shr 8) and 0xFF
                 val oB = origColor and 0xFF
+
+                // Check skin tone proxy (protect subjects even near edges)
+                val isSkin = (oR > 95 && oG > 40 && oB > 20 && (oR - oG) > 15 && oR > oB)
+
+                val dx = (x - centerX) / radiusX
+                val dy = (y - centerY) / radiusY
+                val dist = sqrt(dx * dx + dy * dy)
+                val baseFalloff = ((dist - 0.75f) / 0.55f).coerceIn(0.0f, 1.0f)
+                val blurFactor = if (isSkin && dist < 1.3f) baseFalloff * 0.25f else baseFalloff
 
                 val bR = rAcc / count
                 val bG = gAcc / count
@@ -358,7 +372,7 @@ object ComputationalEngine {
                 val finalG = (oG * (1.0f - blurFactor) + bG * blurFactor).toInt().coerceIn(0, 255)
                 val finalB = (oB * (1.0f - blurFactor) + bB * blurFactor).toInt().coerceIn(0, 255)
 
-                outPixels[rowOffset + x] = (0xFF shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
+                outPixels[y * width + x] = (0xFF shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
             }
         }
 
@@ -371,9 +385,55 @@ object ComputationalEngine {
      * Ultra Macro Detail Enhancement (Texture enhancement & high-pass micro clarity).
      */
     fun applyMacroEnhancement(src: Bitmap): Bitmap {
-        // High sharpening with micro-edge contrast boost
-        val sharpened = unsharpMask(src, amount = 1.1f, threshold = 2)
+        val sharpened = unsharpMask(src, amount = 1.25f, threshold = 2)
         return toneMapAndGrade(sharpened, ColorStyle.VIVID_LANDSCAPE)
+    }
+
+    /**
+     * Night Sight Multi-Frame Stacking (Shadow recovery, temporal noise suppression).
+     */
+    fun processNightSight(frames: List<Bitmap>): Bitmap {
+        val fused = fuseBracketed(frames)
+        // Two-pass spatial noise reduction for low-light sensor read noise
+        val clean1 = bilateralDenoise(fused, spatialSigma = 2.5f, rangeSigma = 32.0f)
+        val clean2 = bilateralDenoise(clean1, spatialSigma = 1.5f, rangeSigma = 20.0f)
+        val graded = toneMapAndGrade(clean2, ColorStyle.NEPAL_TWILIGHT)
+        return unsharpMask(graded, amount = 0.75f, threshold = 3)
+    }
+
+    /**
+     * High Dynamic Range (HDR+) Multi-Exposure Pipeline.
+     */
+    fun processHdr(frames: List<Bitmap>): Bitmap {
+        val fused = fuseBracketed(frames)
+        val denoised = bilateralDenoise(fused, spatialSigma = 1.8f, rangeSigma = 22.0f)
+        val graded = toneMapAndGrade(denoised, ColorStyle.VIVID_LANDSCAPE)
+        return unsharpMask(graded, amount = 0.85f, threshold = 3)
+    }
+
+    /**
+     * Professional DSLR Single-Frame Rendering (Authentic color science, clean film grain).
+     */
+    fun processProDslr(src: Bitmap, manualEvBias: Int): Bitmap {
+        // Apply manual EV brightness normalization
+        val width = src.width
+        val height = src.height
+        val pixels = IntArray(width * height)
+        src.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val evMultiplier = 2.0f.pow(manualEvBias * 0.35f)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val r = (((c shr 16) and 0xFF) * evMultiplier).toInt().coerceIn(0, 255)
+            val g = (((c shr 8) and 0xFF) * evMultiplier).toInt().coerceIn(0, 255)
+            val b = ((c and 0xFF) * evMultiplier).toInt().coerceIn(0, 255)
+            pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+        }
+        val corrected = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        corrected.setPixels(pixels, 0, width, 0, 0, width, height)
+
+        val graded = toneMapAndGrade(corrected, ColorStyle.LEICA_NATURAL)
+        return unsharpMask(graded, amount = 0.7f, threshold = 4)
     }
 
     private fun acesToneCurve(x: Float): Float {
