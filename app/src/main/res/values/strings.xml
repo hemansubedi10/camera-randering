@@ -3,6 +3,8 @@
     <string name="mode_auto">AUTO</string>
     <string name="mode_hdr">HDR+</string>
     <string name="mode_night">NIGHT SIGHT</string>
+    <string name="mode_portrait">PORTRAIT</string>
+    <string name="mode_macro">MACRO</string>
     <string name="mode_pro">PRO DSLR</string>
     <string name="ai_analyzing">AI: Analyzing scene...</string>
     <string name="capturing">Processing Computational RAW...</string>
