@@ -1,14 +1,18 @@
 package com.aiprocamera
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.SeekBar
 import android.widget.TextView
@@ -30,6 +34,8 @@ enum class CameraUIMode {
     AUTO,
     HDR,
     NIGHT_SIGHT,
+    PORTRAIT,
+    MACRO,
     PRO_DSLR
 }
 
@@ -39,6 +45,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraManager: CameraManager
     private var currentMode = CameraUIMode.NIGHT_SIGHT
     private var latestSceneMetrics: SceneMetrics? = null
+    private var lastSavedUri: String? = null
+
+    private lateinit var scaleGestureDetector: ScaleGestureDetector
+    private var currentZoomRatio = 1.0f
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -91,17 +101,40 @@ class MainActivity : AppCompatActivity() {
         )
 
         cameraManager.startCamera {
-            // Camera ready
+            // Camera started - observe zoom state
+            runOnUiThread {
+                cameraManager.getZoomState()?.observe(this) { zoomState ->
+                    if (zoomState != null) {
+                        currentZoomRatio = zoomState.zoomRatio
+                    }
+                }
+            }
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
-        // Tap to focus reticle
-        binding.previewView.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                binding.focusRing.showAt(event.x, event.y)
+        // Pinch-to-zoom detector
+        scaleGestureDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                val factor = detector.scaleFactor
+                currentZoomRatio *= factor
+                cameraManager.setZoomRatio(currentZoomRatio)
+                updateZoomPillsHighlight(currentZoomRatio)
+                return true
             }
-            false
+        })
+
+        // Tap to focus reticle + meter
+        binding.previewView.setOnTouchListener { _, event ->
+            scaleGestureDetector.onTouchEvent(event)
+            if (event.action == MotionEvent.ACTION_DOWN && event.pointerCount == 1) {
+                binding.focusRing.showAt(event.x, event.y)
+                if (::cameraManager.isInitialized) {
+                    cameraManager.triggerFocusAndMetering(event.x, event.y)
+                }
+            }
+            true
         }
 
         // Shutter Button
@@ -113,13 +146,31 @@ class MainActivity : AppCompatActivity() {
         // Flash Toggle
         binding.btnFlash.setOnClickListener {
             val state = cameraManager.toggleFlash()
-            binding.btnFlash.text = "⚡ $state"
+            binding.btnFlash.text = "FLASH $state"
+        }
+
+        // Torch Light Toggle
+        binding.btnTorch.setOnClickListener {
+            val isOn = cameraManager.toggleTorch()
+            if (isOn) {
+                binding.btnTorch.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
+                binding.btnTorch.text = "TORCH ON"
+            } else {
+                binding.btnTorch.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
+                binding.btnTorch.text = "TORCH"
+            }
         }
 
         // Switch Camera (Front/Back)
         binding.btnSwitchCamera.setOnClickListener {
             cameraManager.switchCamera()
         }
+
+        // Zoom Quick Switch Buttons (0.6x, 1x, 2x, 5x)
+        binding.btnZoom06.setOnClickListener { applyDirectZoom(0.6f) }
+        binding.btnZoom1.setOnClickListener { applyDirectZoom(1.0f) }
+        binding.btnZoom2.setOnClickListener { applyDirectZoom(2.0f) }
+        binding.btnZoom5.setOnClickListener { applyDirectZoom(5.0f) }
 
         // Pro Exposure Bias Slider
         binding.seekExposure.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -131,13 +182,58 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // Gallery Preview click
+        binding.imgGalleryPreview.setOnClickListener {
+            lastSavedUri?.let { uriStr ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(Uri.parse(uriStr), "image/jpeg")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Opening default Gallery...", Toast.LENGTH_SHORT).show()
+                    val galleryIntent = Intent(Intent.ACTION_MAIN).apply {
+                        addCategory(Intent.CATEGORY_APP_GALLERY)
+                    }
+                    startActivity(galleryIntent)
+                }
+            }
+        }
+
         // Mode Switching
         binding.modeAuto.setOnClickListener { selectMode(CameraUIMode.AUTO) }
         binding.modeHdr.setOnClickListener { selectMode(CameraUIMode.HDR) }
         binding.modeNight.setOnClickListener { selectMode(CameraUIMode.NIGHT_SIGHT) }
+        binding.modePortrait.setOnClickListener { selectMode(CameraUIMode.PORTRAIT) }
+        binding.modeMacro.setOnClickListener { selectMode(CameraUIMode.MACRO) }
         binding.modePro.setOnClickListener { selectMode(CameraUIMode.PRO_DSLR) }
 
         selectMode(CameraUIMode.NIGHT_SIGHT)
+    }
+
+    private fun applyDirectZoom(ratio: Float) {
+        currentZoomRatio = ratio
+        if (::cameraManager.isInitialized) {
+            cameraManager.setZoomRatio(ratio)
+        }
+        updateZoomPillsHighlight(ratio)
+    }
+
+    private fun updateZoomPillsHighlight(ratio: Float) {
+        val pills = listOf(
+            binding.btnZoom06 to 0.6f,
+            binding.btnZoom1 to 1.0f,
+            binding.btnZoom2 to 2.0f,
+            binding.btnZoom5 to 5.0f
+        )
+        pills.forEach { (view, r) ->
+            if (kotlin.math.abs(ratio - r) < 0.35f) {
+                view.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
+            } else {
+                view.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
+            }
+        }
     }
 
     private fun selectMode(mode: CameraUIMode) {
@@ -146,6 +242,8 @@ class MainActivity : AppCompatActivity() {
             binding.modeAuto to CameraUIMode.AUTO,
             binding.modeHdr to CameraUIMode.HDR,
             binding.modeNight to CameraUIMode.NIGHT_SIGHT,
+            binding.modePortrait to CameraUIMode.PORTRAIT,
+            binding.modeMacro to CameraUIMode.MACRO,
             binding.modePro to CameraUIMode.PRO_DSLR
         )
 
@@ -167,39 +265,59 @@ class MainActivity : AppCompatActivity() {
                 val processedBitmap: Bitmap = withContext(Dispatchers.Default) {
                     when (currentMode) {
                         CameraUIMode.NIGHT_SIGHT, CameraUIMode.HDR -> {
-                            // 1. Bracketed capture (-2 EV, 0 EV, +2 EV)
+                            // Multi-bracketed capture (-2 EV, 0 EV, +2 EV)
                             updateProcessStatus("Capturing 3-Frame Bracket...")
                             val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
-                            // 2. Mertens multi-exposure fusion
                             updateProcessStatus("Mertens Exposure Fusion...")
                             val fused = ComputationalEngine.fuseBracketed(bracketFrames)
 
-                            // 3. Bilateral edge-preserving denoising
                             updateProcessStatus("Edge-Preserving Denoising...")
                             val denoised = ComputationalEngine.bilateralDenoise(fused)
 
-                            // 4. Tone reproduction + Nepal Twilight / Landscape grading
                             updateProcessStatus("Filmic Tone Reproduction...")
                             val graded = ComputationalEngine.toneMapAndGrade(
                                 denoised,
                                 latestSceneMetrics?.recommendedStyle ?: ColorStyle.NEPAL_TWILIGHT
                             )
 
-                            // 5. Unsharp mask detail sharpening
                             updateProcessStatus("Micro-Contrast Sharpening...")
                             ComputationalEngine.unsharpMask(graded)
                         }
 
+                        CameraUIMode.PORTRAIT -> {
+                            updateProcessStatus("Capturing Portrait Frame...")
+                            val rawFrame = cameraManager.captureSingleFrame()
+
+                            updateProcessStatus("Leica Authentic Tone Grading...")
+                            val graded = ComputationalEngine.toneMapAndGrade(
+                                rawFrame,
+                                ColorStyle.LEICA_NATURAL
+                            )
+
+                            updateProcessStatus("Optical Bokeh Fall-Off...")
+                            val bokeh = ComputationalEngine.applyPortraitBokeh(graded)
+
+                            updateProcessStatus("Sharpening Subject Eyes & Facial Detail...")
+                            ComputationalEngine.unsharpMask(bokeh, amount = 0.5f)
+                        }
+
+                        CameraUIMode.MACRO -> {
+                            updateProcessStatus("Capturing Macro Detail...")
+                            val rawFrame = cameraManager.captureSingleFrame()
+
+                            updateProcessStatus("Ultra Texture & Edge Clarification...")
+                            ComputationalEngine.applyMacroEnhancement(rawFrame)
+                        }
+
                         CameraUIMode.AUTO, CameraUIMode.PRO_DSLR -> {
-                            // Single frame pro computational pipeline
                             updateProcessStatus("Capturing Frame...")
                             val rawFrame = cameraManager.captureSingleFrame()
 
                             updateProcessStatus("Filmic Tone Reproduction...")
                             val graded = ComputationalEngine.toneMapAndGrade(
                                 rawFrame,
-                                ColorStyle.LEICA_NATURAL
+                                latestSceneMetrics?.recommendedStyle ?: ColorStyle.LEICA_NATURAL
                             )
 
                             updateProcessStatus("Detail Sharpening...")
@@ -210,13 +328,14 @@ class MainActivity : AppCompatActivity() {
 
                 // Save to MediaStore
                 val path = cameraManager.saveToGallery(processedBitmap)
+                lastSavedUri = path
 
                 // Update Gallery thumbnail on UI
                 binding.imgGalleryPreview.setImageBitmap(
                     Bitmap.createScaledBitmap(processedBitmap, 96, 96, false)
                 )
 
-                Toast.makeText(this@MainActivity, "Photo saved: $path", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Photo saved!", Toast.LENGTH_SHORT).show()
 
             } catch (e: Exception) {
                 Toast.makeText(this@MainActivity, "Capture failed: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -240,6 +359,38 @@ class MainActivity : AppCompatActivity() {
         } else {
             @Suppress("DEPRECATION")
             vibrator?.vibrate(45L)
+        }
+    }
+
+    // Hardware volume keys integration (Physical Shutter & Zoom)
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                // Physical Shutter Button
+                if (binding.btnShutter.isEnabled) {
+                    triggerShutterHaptics()
+                    executeCapturePipeline()
+                }
+                true
+            }
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                // Zoom in by +0.5x on physical key
+                currentZoomRatio = (currentZoomRatio + 0.5f).coerceAtMost(8.0f)
+                if (::cameraManager.isInitialized) {
+                    cameraManager.setZoomRatio(currentZoomRatio)
+                }
+                updateZoomPillsHighlight(currentZoomRatio)
+                true
+            }
+            KeyEvent.KEYCODE_CAMERA -> {
+                // Dedicated Camera button on devices that have one
+                if (binding.btnShutter.isEnabled) {
+                    triggerShutterHaptics()
+                    executeCapturePipeline()
+                }
+                true
+            }
+            else -> super.onKeyDown(keyCode, event)
         }
     }
 
