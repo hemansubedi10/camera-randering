@@ -1,7 +1,6 @@
 package com.aiprocamera.core
 
 import android.content.ContentValues
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -13,6 +12,7 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LiveData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -30,6 +30,7 @@ class CameraManager(
     private val previewView: PreviewView,
     private val onMetricsUpdated: (SceneMetrics) -> Unit
 ) {
+    private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraControl: CameraControl? = null
     private var cameraInfo: CameraInfo? = null
@@ -38,6 +39,7 @@ class CameraManager(
 
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var flashMode = ImageCapture.FLASH_MODE_OFF
+    private var torchEnabled = false
 
     fun startCamera(onReady: () -> Unit) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
@@ -74,7 +76,7 @@ class CameraManager(
             }
 
         provider.unbindAll()
-        val camera = provider.bindToLifecycle(
+        val cam = provider.bindToLifecycle(
             activity,
             cameraSelector,
             preview,
@@ -82,8 +84,9 @@ class CameraManager(
             imageAnalysis
         )
 
-        cameraControl = camera.cameraControl
-        cameraInfo = camera.cameraInfo
+        camera = cam
+        cameraControl = cam.cameraControl
+        cameraInfo = cam.cameraInfo
     }
 
     fun switchCamera() {
@@ -109,8 +112,39 @@ class CameraManager(
         }
     }
 
+    fun toggleTorch(): Boolean {
+        torchEnabled = !torchEnabled
+        cameraControl?.enableTorch(torchEnabled)
+        return torchEnabled
+    }
+
     fun setExposureCompensation(biasIndex: Int) {
         cameraControl?.setExposureCompensationIndex(biasIndex)
+    }
+
+    fun setZoomRatio(ratio: Float) {
+        val info = cameraInfo ?: return
+        val minRatio = info.zoomState.value?.minZoomRatio ?: 1.0f
+        val maxRatio = info.zoomState.value?.maxZoomRatio ?: 8.0f
+        val clamped = ratio.coerceIn(minRatio, maxRatio)
+        cameraControl?.setZoomRatio(clamped)
+    }
+
+    fun setLinearZoom(linear: Float) {
+        cameraControl?.setLinearZoom(linear.coerceIn(0.0f, 1.0f))
+    }
+
+    fun getZoomState(): LiveData<ZoomState>? {
+        return cameraInfo?.zoomState
+    }
+
+    fun triggerFocusAndMetering(x: Float, y: Float) {
+        val factory = previewView.meteringPointFactory
+        val point = factory.createPoint(x, y)
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+            .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        cameraControl?.startFocusAndMetering(action)
     }
 
     /**
