@@ -5,9 +5,14 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.KeyEvent
@@ -39,7 +44,7 @@ enum class CameraUIMode {
     PRO_DSLR
 }
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var cameraManager: CameraManager
@@ -49,6 +54,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var scaleGestureDetector: ScaleGestureDetector
     private var currentZoomRatio = 1.0f
+
+    // Sensor manager for spirit level
+    private var sensorManager: SensorManager? = null
+    private var rotationSensor: Sensor? = null
+
+    // Self-timer seconds (0 = off, 3 = 3s, 10 = 10s)
+    private var timerSeconds = 0
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -67,9 +79,50 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        initSensors()
         setupUI()
         checkPermissionsAndStart()
     }
+
+    private fun initSensors() {
+        sensorManager = getSystemService(SENSOR_SERVICE) as? SensorManager
+        rotationSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        rotationSensor?.let {
+            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager?.unregisterListener(this)
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null) return
+        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+            val rotationMatrix = FloatArray(9)
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+            val orientation = FloatArray(3)
+            SensorManager.getOrientation(rotationMatrix, orientation)
+            // Roll in degrees (pitch and roll)
+            val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
+            val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
+            binding.cameraOverlay.pitchAngle = pitch
+            binding.cameraOverlay.rollAngle = roll
+        } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            val ax = event.values[0]
+            val ay = event.values[1]
+            val roll = Math.toDegrees(kotlin.math.atan2(-ax.toDouble(), ay.toDouble())).toFloat()
+            binding.cameraOverlay.rollAngle = roll
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun checkPermissionsAndStart() {
         val required = mutableListOf(Manifest.permission.CAMERA)
@@ -96,12 +149,12 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     latestSceneMetrics = metrics
                     binding.txtAiScene.text = "AI: ${metrics.luxEstimate.toInt()} Lux • ${metrics.sceneType}"
+                    binding.cameraOverlay.updateHistogram(metrics.histogramBins)
                 }
             }
         )
 
         cameraManager.startCamera {
-            // Camera started - observe zoom state
             runOnUiThread {
                 cameraManager.getZoomState()?.observe(this) { zoomState ->
                     if (zoomState != null) {
@@ -139,8 +192,35 @@ class MainActivity : AppCompatActivity() {
 
         // Shutter Button
         binding.btnShutter.setOnClickListener {
-            triggerShutterHaptics()
-            executeCapturePipeline()
+            handleShutterClick()
+        }
+
+        // Self-Timer Toggle (0s -> 3s -> 10s -> 0s)
+        binding.btnTimer.setOnClickListener {
+            timerSeconds = when (timerSeconds) {
+                0 -> 3
+                3 -> 10
+                else -> 0
+            }
+            if (timerSeconds > 0) {
+                binding.btnTimer.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
+                binding.btnTimer.text = "⏱ ${timerSeconds}s"
+            } else {
+                binding.btnTimer.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
+                binding.btnTimer.text = "⏱ OFF"
+            }
+        }
+
+        // Grid / Leveler Toggle
+        binding.btnGridToggle.setOnClickListener {
+            val isGridOn = binding.cameraOverlay.showGrid
+            binding.cameraOverlay.showGrid = !isGridOn
+            binding.cameraOverlay.showLeveler = !isGridOn
+            if (!isGridOn) {
+                binding.btnGridToggle.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
+            } else {
+                binding.btnGridToggle.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
+            }
         }
 
         // Flash Toggle
@@ -212,6 +292,30 @@ class MainActivity : AppCompatActivity() {
         selectMode(CameraUIMode.NIGHT_SIGHT)
     }
 
+    private fun handleShutterClick() {
+        if (!binding.btnShutter.isEnabled) return
+        triggerShutterHaptics()
+
+        if (timerSeconds > 0) {
+            binding.btnShutter.isEnabled = false
+            binding.txtCountdown.visibility = View.VISIBLE
+            object : CountDownTimer((timerSeconds * 1000).toLong(), 1000) {
+                override fun onTick(millisUntilFinished: Long) {
+                    val sec = (millisUntilFinished / 1000) + 1
+                    binding.txtCountdown.text = "$sec"
+                    triggerShutterHaptics()
+                }
+
+                override fun onFinish() {
+                    binding.txtCountdown.visibility = View.GONE
+                    executeCapturePipeline()
+                }
+            }.start()
+        } else {
+            executeCapturePipeline()
+        }
+    }
+
     private fun applyDirectZoom(ratio: Float) {
         currentZoomRatio = ratio
         if (::cameraManager.isInitialized) {
@@ -265,7 +369,6 @@ class MainActivity : AppCompatActivity() {
                 val processedBitmap: Bitmap = withContext(Dispatchers.Default) {
                     when (currentMode) {
                         CameraUIMode.NIGHT_SIGHT, CameraUIMode.HDR -> {
-                            // Multi-bracketed capture (-2 EV, 0 EV, +2 EV)
                             updateProcessStatus("Capturing 3-Frame Bracket...")
                             val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
@@ -326,11 +429,9 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Save to MediaStore
                 val path = cameraManager.saveToGallery(processedBitmap)
                 lastSavedUri = path
 
-                // Update Gallery thumbnail on UI
                 binding.imgGalleryPreview.setImageBitmap(
                     Bitmap.createScaledBitmap(processedBitmap, 96, 96, false)
                 )
@@ -366,15 +467,10 @@ class MainActivity : AppCompatActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                // Physical Shutter Button
-                if (binding.btnShutter.isEnabled) {
-                    triggerShutterHaptics()
-                    executeCapturePipeline()
-                }
+                handleShutterClick()
                 true
             }
             KeyEvent.KEYCODE_VOLUME_UP -> {
-                // Zoom in by +0.5x on physical key
                 currentZoomRatio = (currentZoomRatio + 0.5f).coerceAtMost(8.0f)
                 if (::cameraManager.isInitialized) {
                     cameraManager.setZoomRatio(currentZoomRatio)
@@ -383,11 +479,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             KeyEvent.KEYCODE_CAMERA -> {
-                // Dedicated Camera button on devices that have one
-                if (binding.btnShutter.isEnabled) {
-                    triggerShutterHaptics()
-                    executeCapturePipeline()
-                }
+                handleShutterClick()
                 true
             }
             else -> super.onKeyDown(keyCode, event)
