@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var currentMode = CameraUIMode.NIGHT_SIGHT
     private var latestSceneMetrics: SceneMetrics? = null
     private var lastSavedUri: String? = null
+    private var manualEvCompensation: Int = 0
 
     private lateinit var scaleGestureDetector: ScaleGestureDetector
     private var currentZoomRatio = 1.0f
@@ -109,7 +110,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
             val orientation = FloatArray(3)
             SensorManager.getOrientation(rotationMatrix, orientation)
-            // Roll in degrees (pitch and roll)
             val pitch = Math.toDegrees(orientation[1].toDouble()).toFloat()
             val roll = Math.toDegrees(orientation[2].toDouble()).toFloat()
             binding.cameraOverlay.pitchAngle = pitch
@@ -256,6 +256,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         binding.seekExposure.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val bias = progress - 4 // Range -4 to +4 EV
+                manualEvCompensation = bias
                 cameraManager.setExposureCompensation(bias)
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -272,7 +273,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     }
                     startActivity(intent)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "Opening default Gallery...", Toast.LENGTH_SHORT).show()
                     val galleryIntent = Intent(Intent.ACTION_MAIN).apply {
                         addCategory(Intent.CATEGORY_APP_GALLERY)
                     }
@@ -281,7 +281,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
         }
 
-        // Mode Switching
+        // Mode Switching Listeners
         binding.modeAuto.setOnClickListener { selectMode(CameraUIMode.AUTO) }
         binding.modeHdr.setOnClickListener { selectMode(CameraUIMode.HDR) }
         binding.modeNight.setOnClickListener { selectMode(CameraUIMode.NIGHT_SIGHT) }
@@ -342,6 +342,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun selectMode(mode: CameraUIMode) {
         currentMode = mode
+        triggerTickHaptics()
+
         val modes = listOf(
             binding.modeAuto to CameraUIMode.AUTO,
             binding.modeHdr to CameraUIMode.HDR,
@@ -353,9 +355,44 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         modes.forEach { (view, m) ->
             if (m == mode) {
+                // Active Glowing Pill with spring scale animation
+                view.setBackgroundResource(R.drawable.bg_mode_active_pill)
                 view.setTextColor(ContextCompat.getColor(this, R.color.gold_pro))
+                view.animate()
+                    .scaleX(1.10f)
+                    .scaleY(1.10f)
+                    .setDuration(180)
+                    .start()
+
+                // Auto-center selected mode in horizontal scroll view
+                binding.modeScroll.post {
+                    val scrollX = (view.left + view.right) / 2 - binding.modeScroll.width / 2
+                    binding.modeScroll.smoothScrollTo(scrollX, 0)
+                }
             } else {
+                // Inactive Mode
+                view.setBackgroundResource(R.drawable.bg_mode_inactive_pill)
                 view.setTextColor(ContextCompat.getColor(this, R.color.gray_text))
+                view.animate()
+                    .scaleX(1.0f)
+                    .scaleY(1.0f)
+                    .setDuration(180)
+                    .start()
+            }
+        }
+
+        // Show/hide exposure slider specifically for Pro mode
+        if (mode == CameraUIMode.PRO_DSLR) {
+            binding.seekExposure.visibility = View.VISIBLE
+            binding.btnHdrBadge.text = "PRO RAW"
+        } else {
+            binding.seekExposure.visibility = View.VISIBLE
+            binding.btnHdrBadge.text = when (mode) {
+                CameraUIMode.NIGHT_SIGHT -> "NIGHT AI"
+                CameraUIMode.HDR -> "RAW HDR+"
+                CameraUIMode.PORTRAIT -> "BOKEH"
+                CameraUIMode.MACRO -> "MACRO HD"
+                else -> "AI AUTO"
             }
         }
     }
@@ -368,63 +405,58 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             try {
                 val processedBitmap: Bitmap = withContext(Dispatchers.Default) {
                     when (currentMode) {
-                        CameraUIMode.NIGHT_SIGHT, CameraUIMode.HDR -> {
-                            updateProcessStatus("Capturing 3-Frame Bracket...")
+                        CameraUIMode.NIGHT_SIGHT -> {
+                            updateProcessStatus("Capturing Night Sight Bracket (-2 EV, 0 EV, +2 EV)...")
                             val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
-                            updateProcessStatus("Mertens Exposure Fusion...")
-                            val fused = ComputationalEngine.fuseBracketed(bracketFrames)
+                            updateProcessStatus("Mertens Fusion & Deep Noise Scrubbing...")
+                            ComputationalEngine.processNightSight(bracketFrames)
+                        }
 
-                            updateProcessStatus("Edge-Preserving Denoising...")
-                            val denoised = ComputationalEngine.bilateralDenoise(fused)
+                        CameraUIMode.HDR -> {
+                            updateProcessStatus("Capturing High Dynamic Range Multi-Exposure...")
+                            val bracketFrames = cameraManager.captureBracketedBurst(listOf(-2, 0, 2))
 
-                            updateProcessStatus("Filmic Tone Reproduction...")
-                            val graded = ComputationalEngine.toneMapAndGrade(
-                                denoised,
-                                latestSceneMetrics?.recommendedStyle ?: ColorStyle.NEPAL_TWILIGHT
-                            )
-
-                            updateProcessStatus("Micro-Contrast Sharpening...")
-                            ComputationalEngine.unsharpMask(graded)
+                            updateProcessStatus("Dynamic Range Fusion & Highlight Preservation...")
+                            ComputationalEngine.processHdr(bracketFrames)
                         }
 
                         CameraUIMode.PORTRAIT -> {
                             updateProcessStatus("Capturing Portrait Frame...")
                             val rawFrame = cameraManager.captureSingleFrame()
 
-                            updateProcessStatus("Leica Authentic Tone Grading...")
-                            val graded = ComputationalEngine.toneMapAndGrade(
-                                rawFrame,
-                                ColorStyle.LEICA_NATURAL
-                            )
-
-                            updateProcessStatus("Optical Bokeh Fall-Off...")
+                            updateProcessStatus("Optical Bokeh Fall-Off & Facial Tone Polish...")
+                            val graded = ComputationalEngine.toneMapAndGrade(rawFrame, ColorStyle.LEICA_NATURAL)
                             val bokeh = ComputationalEngine.applyPortraitBokeh(graded)
-
-                            updateProcessStatus("Sharpening Subject Eyes & Facial Detail...")
-                            ComputationalEngine.unsharpMask(bokeh, amount = 0.5f)
+                            ComputationalEngine.unsharpMask(bokeh, amount = 0.55f, threshold = 3)
                         }
 
                         CameraUIMode.MACRO -> {
-                            updateProcessStatus("Capturing Macro Detail...")
+                            updateProcessStatus("Capturing Macro Close-Up...")
                             val rawFrame = cameraManager.captureSingleFrame()
 
-                            updateProcessStatus("Ultra Texture & Edge Clarification...")
+                            updateProcessStatus("Ultra Texture & Micro-Edge Clarification...")
                             ComputationalEngine.applyMacroEnhancement(rawFrame)
                         }
 
-                        CameraUIMode.AUTO, CameraUIMode.PRO_DSLR -> {
-                            updateProcessStatus("Capturing Frame...")
+                        CameraUIMode.PRO_DSLR -> {
+                            updateProcessStatus("Capturing Pro DSLR Sensor Frame...")
                             val rawFrame = cameraManager.captureSingleFrame()
 
-                            updateProcessStatus("Filmic Tone Reproduction...")
+                            updateProcessStatus("Manual Exposure Grading & Film Roll-Off...")
+                            ComputationalEngine.processProDslr(rawFrame, manualEvCompensation)
+                        }
+
+                        CameraUIMode.AUTO -> {
+                            updateProcessStatus("AI Computational Capture...")
+                            val rawFrame = cameraManager.captureSingleFrame()
+
+                            updateProcessStatus("Adaptive Scene Reproduction...")
                             val graded = ComputationalEngine.toneMapAndGrade(
                                 rawFrame,
                                 latestSceneMetrics?.recommendedStyle ?: ColorStyle.LEICA_NATURAL
                             )
-
-                            updateProcessStatus("Detail Sharpening...")
-                            ComputationalEngine.unsharpMask(graded)
+                            ComputationalEngine.unsharpMask(graded, amount = 0.65f)
                         }
                     }
                 }
@@ -453,17 +485,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private fun triggerShutterHaptics() {
+    private fun triggerTickHaptics() {
         val vibrator = getSystemService(VIBRATOR_SERVICE) as? Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator?.vibrate(VibrationEffect.createOneShot(45L, VibrationEffect.DEFAULT_AMPLITUDE))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
         } else {
             @Suppress("DEPRECATION")
-            vibrator?.vibrate(45L)
+            vibrator?.vibrate(18L)
         }
     }
 
-    // Hardware volume keys integration (Physical Shutter & Zoom)
+    private fun triggerShutterHaptics() {
+        val vibrator = getSystemService(VIBRATOR_SERVICE) as? Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(50L, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(50L)
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN -> {
