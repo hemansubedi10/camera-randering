@@ -45,8 +45,19 @@
             android:id="@+id/btnFlash"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⚡ OFF"
+            android:text="FLASH OFF"
             android:textColor="@color/white"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:padding="8dp" />
+
+        <TextView
+            android:id="@+id/btnTorch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="TORCH"
+            android:textColor="@color/gray_text"
             android:textSize="12sp"
             android:textStyle="bold"
             android:padding="8dp" />
@@ -61,7 +72,7 @@
             android:id="@+id/txtAiScene"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="AI: 12 Lux • Mountain Twilight"
+            android:text="AI: Analyzing scene..."
             android:textColor="@color/gold_pro"
             android:textSize="12sp"
             android:textStyle="bold"
@@ -102,6 +113,67 @@
         app:layout_constraintBottom_toBottomOf="parent"
         android:layout_marginEnd="-60dp" />
 
+    <!-- Zoom Quick Switch Pills (0.6x, 1x, 2x, 5x) -->
+    <LinearLayout
+        android:id="@+id/zoomBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@drawable/bg_glass_panel"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:layout_marginBottom="16dp"
+        app:layout_constraintBottom_toTopOf="@+id/bottomControls"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/btnZoom06"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0.6x"
+            android:textColor="@color/gray_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btnZoom1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1x"
+            android:textColor="@color/gold_pro"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btnZoom2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2x"
+            android:textColor="@color/gray_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/btnZoom5"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="5x"
+            android:textColor="@color/gray_text"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+    </LinearLayout>
+
     <!-- Processing Overlay (Visible during computational fusion) -->
     <LinearLayout
         android:id="@+id/processingOverlay"
@@ -110,7 +182,7 @@
         android:orientation="vertical"
         android:gravity="center"
         android:background="@drawable/bg_glass_panel"
-        android:padding="16dp"
+        android:padding="20dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -118,28 +190,26 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <ProgressBar
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
             android:indeterminateTint="@color/gold_pro" />
 
         <TextView
             android:id="@+id/txtProcessStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/capturing"
+            android:layout_marginTop="12dp"
+            android:text="Processing Frame..."
             android:textColor="@color/white"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold" />
     </LinearLayout>
 
     <!-- Bottom Controls Container -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/bottomControls"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#D9000000"
-        android:paddingTop="12dp"
         android:paddingBottom="36dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -188,6 +258,26 @@
                     android:layout_height="wrap_content"
                     android:text="@string/mode_night"
                     android:textColor="@color/gold_pro"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:padding="10dp" />
+
+                <TextView
+                    android:id="@+id/modePortrait"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/mode_portrait"
+                    android:textColor="@color/gray_text"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:padding="10dp" />
+
+                <TextView
+                    android:id="@+id/modeMacro"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/mode_macro"
+                    android:textColor="@color/gray_text"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     android:padding="10dp" />
