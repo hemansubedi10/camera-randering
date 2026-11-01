@@ -17,6 +17,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <!-- Camera Overlay (Grid, Horizon Leveler, Real-Time Histogram) -->
+    <com.aiprocamera.ui.CameraOverlayView
+        android:id="@+id/cameraOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
     <!-- Focus Ring reticle overlay -->
     <com.aiprocamera.ui.FocusRingView
         android:id="@+id/focusRing"
@@ -47,20 +55,42 @@
             android:layout_height="wrap_content"
             android:text="FLASH OFF"
             android:textColor="@color/white"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:padding="8dp" />
+            android:padding="6dp" />
 
         <TextView
             android:id="@+id/btnTorch"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
+            android:layout_marginStart="2dp"
             android:text="TORCH"
             android:textColor="@color/gray_text"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:padding="8dp" />
+            android:padding="6dp" />
+
+        <TextView
+            android:id="@+id/btnTimer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="2dp"
+            android:text="⏱ OFF"
+            android:textColor="@color/gray_text"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:padding="6dp" />
+
+        <TextView
+            android:id="@+id/btnGridToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="2dp"
+            android:text="GRID"
+            android:textColor="@color/gold_pro"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:padding="6dp" />
 
         <View
             android:layout_width="0dp"
@@ -74,11 +104,11 @@
             android:layout_height="wrap_content"
             android:text="AI: Analyzing scene..."
             android:textColor="@color/gold_pro"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             android:background="@drawable/bg_mode_pill"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
             android:paddingTop="4dp"
             android:paddingBottom="4dp" />
 
@@ -93,10 +123,25 @@
             android:layout_height="wrap_content"
             android:text="RAW HDR"
             android:textColor="@color/gold_pro"
-            android:textSize="11sp"
+            android:textSize="10sp"
             android:textStyle="bold"
-            android:padding="8dp" />
+            android:padding="6dp" />
     </LinearLayout>
+
+    <!-- Countdown Timer Overlay -->
+    <TextView
+        android:id="@+id/txtCountdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="3"
+        android:textColor="@color/gold_pro"
+        android:textSize="96sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- EV Exposure Bias Slider (Pro manual control) -->
     <SeekBar
