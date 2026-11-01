@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="gold_pro">#FFFFD700</color>
+    <color name="leica_red">#FFE53935</color>
+    <color name="glass_dark">#99141414</color>
+    <color name="glass_border">#33FFFFFF</color>
+    <color name="gray_text">#FFAAAAAA</color>
+    <color name="shutter_inner">#FFFFFFFF</color>
+    <color name="shutter_ring">#66FFFFFF</color>
+    <color name="pill_active">#FFFFD700</color>
+    <color name="pill_inactive">#4DFFFFFF</color>
+</resources>

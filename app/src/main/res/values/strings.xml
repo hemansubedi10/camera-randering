@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">AI Pro Camera</string>
+    <string name="mode_auto">AUTO</string>
+    <string name="mode_hdr">HDR+</string>
+    <string name="mode_night">NIGHT SIGHT</string>
+    <string name="mode_pro">PRO DSLR</string>
+    <string name="ai_analyzing">AI: Analyzing scene...</string>
+    <string name="capturing">Processing Computational RAW...</string>
+    <string name="saved">Saved to DCIM/AIProCamera</string>
+</resources>
